@@ -710,9 +710,6 @@ function convertMessages(
 		} else if (msg.role === "assistant") {
 			const blocks: ContentBlockParam[] = [];
 
-			// Track if we have server tool use blocks that need matching results in the user turn
-			const serverToolResults: any[] = [];
-
 			for (const block of msg.content) {
 				const anyBlock = block as any;
 				if (anyBlock._serverToolUse) {
@@ -724,12 +721,12 @@ function convertMessages(
 						input: anyBlock._serverToolUse.input,
 					} as any);
 				} else if (anyBlock._webSearchToolResult) {
-					// Collect web search tool results - they go in the next user message
-					serverToolResults.push({
+					// Web search results stay in the assistant message (server-executed tool)
+					blocks.push({
 						type: "web_search_tool_result",
 						tool_use_id: anyBlock._webSearchToolResult.tool_use_id,
 						content: anyBlock._webSearchToolResult.content,
-					});
+					} as any);
 				} else if (block.type === "text") {
 					if (block.text.trim().length === 0) continue;
 					blocks.push({
@@ -763,15 +760,6 @@ function convertMessages(
 				}
 			}
 
-			// If there are server tool results, they must be in a user message following the assistant message
-			if (serverToolResults.length > 0) {
-				if (blocks.length > 0) {
-					params.push({ role: "assistant", content: blocks });
-				}
-				// Server tool results go in a user message (same as regular tool results)
-				params.push({ role: "user", content: serverToolResults as any });
-				continue; // Skip the normal push below
-			}
 			if (blocks.length === 0) continue;
 			params.push({
 				role: "assistant",
