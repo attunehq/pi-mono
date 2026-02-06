@@ -18,6 +18,10 @@ export interface SlackEvent {
 	files?: Array<{ name?: string; url_private_download?: string; url_private?: string }>;
 	/** Processed attachments with local paths (populated after logUserMessage) */
 	attachments?: Attachment[];
+	/** Thread timestamp - present when the message is a reply in a thread */
+	thread_ts?: string;
+	/** If true, mom should reply in a thread off the user's message */
+	replyInThread?: boolean;
 }
 
 export interface SlackUser {
@@ -52,6 +56,10 @@ export interface SlackContext {
 		channel: string;
 		ts: string;
 		attachments: Array<{ local: string }>;
+		/** Thread ts if this message is in a thread */
+		thread_ts?: string;
+		/** If true, mom should reply in a thread off the user's message */
+		replyInThread?: boolean;
 	};
 	channelName?: string;
 	channels: ChannelInfo[];
@@ -277,6 +285,7 @@ export class SlackBot {
 				channel: string;
 				user: string;
 				ts: string;
+				thread_ts?: string;
 				files?: Array<{ name: string; url_private_download?: string; url_private?: string }>;
 			};
 
@@ -286,13 +295,23 @@ export class SlackBot {
 				return;
 			}
 
+			let text = e.text.replace(/<@[A-Z0-9]+>/gi, "").trim();
+
+			// Check for :thread: directive
+			const threadDirective = text.startsWith(":thread:");
+			if (threadDirective) {
+				text = text.slice(":thread:".length).trim();
+			}
+
 			const slackEvent: SlackEvent = {
 				type: "mention",
 				channel: e.channel,
 				ts: e.ts,
 				user: e.user,
-				text: e.text.replace(/<@[A-Z0-9]+>/gi, "").trim(),
+				text,
 				files: e.files,
+				thread_ts: e.thread_ts,
+				replyInThread: threadDirective || !!e.thread_ts,
 			};
 
 			// SYNC: Log to log.jsonl (ALWAYS, even for old messages)
@@ -336,6 +355,7 @@ export class SlackBot {
 				channel: string;
 				user?: string;
 				ts: string;
+				thread_ts?: string;
 				channel_type?: string;
 				subtype?: string;
 				bot_id?: string;
@@ -365,13 +385,23 @@ export class SlackBot {
 				return;
 			}
 
+			let dmText = (e.text || "").replace(/<@[A-Z0-9]+>/gi, "").trim();
+
+			// Check for :thread: directive in DMs too
+			const dmThreadDirective = dmText.startsWith(":thread:");
+			if (dmThreadDirective) {
+				dmText = dmText.slice(":thread:".length).trim();
+			}
+
 			const slackEvent: SlackEvent = {
 				type: isDM ? "dm" : "mention",
 				channel: e.channel,
 				ts: e.ts,
 				user: e.user,
-				text: (e.text || "").replace(/<@[A-Z0-9]+>/gi, "").trim(),
+				text: dmText,
 				files: e.files,
+				thread_ts: e.thread_ts,
+				replyInThread: dmThreadDirective || !!e.thread_ts,
 			};
 
 			// SYNC: Log to log.jsonl (ALL messages - channel chatter and DMs)

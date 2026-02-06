@@ -359,35 +359,6 @@ function extractToolResultText(result: unknown): string {
 	return JSON.stringify(result);
 }
 
-function formatToolArgsForSlack(_toolName: string, args: Record<string, unknown>): string {
-	const lines: string[] = [];
-
-	for (const [key, value] of Object.entries(args)) {
-		if (key === "label") continue;
-
-		if (key === "path" && typeof value === "string") {
-			const offset = args.offset as number | undefined;
-			const limit = args.limit as number | undefined;
-			if (offset !== undefined && limit !== undefined) {
-				lines.push(`${value}:${offset}-${offset + limit}`);
-			} else {
-				lines.push(value);
-			}
-			continue;
-		}
-
-		if (key === "offset" || key === "limit") continue;
-
-		if (typeof value === "string") {
-			lines.push(value);
-		} else {
-			lines.push(JSON.stringify(value));
-		}
-	}
-
-	return lines.join("\n");
-}
-
 // Cache runners per channel
 const channelRunners = new Map<string, AgentRunner>();
 
@@ -530,19 +501,7 @@ function createRunner(sandboxConfig: SandboxConfig, channelId: string, channelDi
 				log.logToolSuccess(logCtx, agentEvent.toolName, durationMs, resultStr);
 			}
 
-			// Post args + result to thread
-			const label = pending?.args ? (pending.args as { label?: string }).label : undefined;
-			const argsFormatted = pending
-				? formatToolArgsForSlack(agentEvent.toolName, pending.args as Record<string, unknown>)
-				: "(args not found)";
-			const duration = (durationMs / 1000).toFixed(1);
-			let threadMessage = `*${agentEvent.isError ? "✗" : "✓"} ${agentEvent.toolName}*`;
-			if (label) threadMessage += `: ${label}`;
-			threadMessage += ` (${duration}s)\n`;
-			if (argsFormatted) threadMessage += `\`\`\`\n${argsFormatted}\n\`\`\`\n`;
-			threadMessage += `*Result:*\n\`\`\`\n${resultStr}\n\`\`\``;
-
-			queue.enqueueMessage(threadMessage, "thread", "tool result thread", false);
+			// Tool details only go to server logs, not Slack threads
 
 			if (agentEvent.isError) {
 				queue.enqueue(() => ctx.respond(`_Error: ${truncate(resultStr, 200)}_`, false), "tool error");
@@ -592,13 +551,11 @@ function createRunner(sandboxConfig: SandboxConfig, channelId: string, channelDi
 				for (const thinking of thinkingParts) {
 					log.logThinking(logCtx, thinking);
 					queue.enqueueMessage(`_${thinking}_`, "main", "thinking main");
-					queue.enqueueMessage(`_${thinking}_`, "thread", "thinking thread", false);
 				}
 
 				if (text.trim()) {
 					log.logResponse(logCtx, text);
 					queue.enqueueMessage(text, "main", "response main");
-					queue.enqueueMessage(text, "thread", "response thread", false);
 				}
 			}
 		} else if (event.type === "auto_compaction_start") {
@@ -826,9 +783,8 @@ function createRunner(sandboxConfig: SandboxConfig, channelId: string, channelDi
 				}
 			}
 
-			// Log usage summary with context info
+			// Log usage summary to server logs only (not posted to Slack)
 			if (runState.totalUsage.cost.total > 0) {
-				// Get last non-aborted assistant message for context calculation
 				const messages = session.messages;
 				const lastAssistantMessage = messages
 					.slice()
@@ -843,9 +799,8 @@ function createRunner(sandboxConfig: SandboxConfig, channelId: string, channelDi
 					: 0;
 				const contextWindow = model.contextWindow || 200000;
 
-				const summary = log.logUsageSummary(runState.logCtx!, runState.totalUsage, contextTokens, contextWindow);
-				runState.queue.enqueue(() => ctx.respondInThread(summary), "usage summary");
-				await queueChain;
+				// Log to server only, don't post to Slack
+				log.logUsageSummary(runState.logCtx!, runState.totalUsage, contextTokens, contextWindow);
 			}
 
 			// Clear run state
